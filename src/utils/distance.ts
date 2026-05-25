@@ -1,9 +1,8 @@
 const EARTH_RADIUS_METERS = 6371008.8;
 
-export interface Coordinate {
-  lat: number;
-  lng: number;
-}
+import type { Coordinate } from '../types';
+
+export type { Coordinate };
 
 function toRadians(value: number): number {
   return (value * Math.PI) / 180;

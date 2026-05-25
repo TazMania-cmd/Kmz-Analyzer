@@ -1,10 +1,15 @@
 export type CountType = 'CTO' | 'CEO' | 'POSTES' | 'RAMAIS' | 'BACKBONE' | 'CORDOALHAS';
 
-export type CableGroup = 'RAMAIS' | 'BACKBONE';
+export type CableGroup = 'RAMAL' | 'BACKBONE';
 
 export type CableType = 'CABO 06 F.O' | 'CABO 12 F.O' | 'CABO 24 F.O' | 'CABO 36 F.O' | 'CABO 72 F.O' | 'CABO 144 F.O';
 
 export type GeometryType = 'Point' | 'LineString' | 'Polygon' | 'MultiGeometry' | 'Unknown';
+
+export interface Coordinate {
+  lat: number;
+  lng: number;
+}
 
 export type ManualMappingValue = CountType | 'SETOR' | 'CABOS' | 'IGNORAR' | 'REDE_MISTA';
 
@@ -28,8 +33,12 @@ export interface AnalyzedItem {
   sector: string;
   type: CountType;
   meters: number;
+  coordinates: Coordinate[];
   cableGroup?: CableGroup;
   cableType?: CableType;
+  cableFunction?: CableGroup;
+  allowedPointTypes?: CountType[];
+  ignoredPointTypes?: CountType[];
 }
 
 export interface SummaryRow {

@@ -22,6 +22,7 @@ import type {
   CableGroup,
   CableSummaryRow,
   CableType,
+  Coordinate,
   CountType,
   ManualMappingValue,
   ManualMappings,
@@ -31,7 +32,7 @@ import type {
 import { analyzeFile } from './utils/analyze';
 import { exportCsv, exportExcel, exportPdf } from './utils/exporters';
 
-const CABLE_GROUPS: CableGroup[] = ['RAMAIS', 'BACKBONE'];
+const CABLE_GROUPS: CableGroup[] = ['RAMAL', 'BACKBONE'];
 const CABLE_TYPES: CableType[] = ['CABO 06 F.O', 'CABO 12 F.O', 'CABO 24 F.O', 'CABO 36 F.O', 'CABO 72 F.O', 'CABO 144 F.O'];
 const MANUAL_OPTIONS: ManualMappingValue[] = ['SETOR', 'CTO', 'CEO', 'POSTES', 'CABOS', 'RAMAIS', 'BACKBONE', 'CORDOALHAS', 'IGNORAR', 'REDE_MISTA'];
 
@@ -47,6 +48,9 @@ const DEFAULT_INSTALLATION_SETTINGS = {
   ctoConservative: 5,
   ctoOptimistic: 10,
 };
+const RESERVA_POR_PONTO_METROS = 15;
+const TOLERANCIA_CONEXAO_METROS = 3;
+const TECHNICAL_RESERVE_INITIAL_ROWS = 10;
 
 export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -98,6 +102,15 @@ export default function App() {
 
   const totals = useMemo(() => buildTotals(filteredRows), [filteredRows]);
   const cableTotals = useMemo(() => buildCableTotals(filteredCableRows), [filteredCableRows]);
+  const technicalReserveRows = useMemo(() => {
+    return calculateTechnicalReserve(scopedItems).filter((row) => {
+      const sectorMatches = sectorFilter === 'TODOS' || row.sector === sectorFilter;
+      const groupMatches = cableGroupFilter === 'TODOS' || row.group === cableGroupFilter;
+      const cableMatches = cableTypeFilter === 'TODOS' || row.cable === cableTypeFilter;
+      return sectorMatches && groupMatches && cableMatches;
+    });
+  }, [scopedItems, sectorFilter, cableGroupFilter, cableTypeFilter]);
+  const technicalReserveSummary = useMemo(() => buildTechnicalReserveSummary(technicalReserveRows), [technicalReserveRows]);
   const installationRows = useMemo(() => {
     return summarizeItems(scopedItems).filter((row) => sectorFilter === 'TODOS' || row.sector === sectorFilter);
   }, [scopedItems, sectorFilter]);
@@ -273,8 +286,8 @@ export default function App() {
             <MetricCard label="CTOs" value={totals.CTO.quantity} />
             <MetricCard label="CEOs" value={totals.CEO.quantity} />
             <MetricCard label="Postes" value={totals.POSTES.quantity} />
-            <MetricCard label="Total de ramais" value={cableTotals.RAMAIS.quantity} />
-            <MetricCard label="KM de ramais" value={`${preciseKmFormatter.format(cableTotals.RAMAIS.km)}km`} />
+            <MetricCard label="Total de ramais" value={cableTotals.RAMAL.quantity} />
+            <MetricCard label="KM de ramais" value={`${preciseKmFormatter.format(cableTotals.RAMAL.km)}km`} />
             <MetricCard label="Total de backbone" value={cableTotals.BACKBONE.quantity} />
             <MetricCard label="KM de backbone" value={`${preciseKmFormatter.format(cableTotals.BACKBONE.km)}km`} />
           </section>
@@ -338,6 +351,7 @@ export default function App() {
               ctoOptimistic: setInstallationCtoOptimistic,
             }}
           />
+          <TechnicalReserveSection rows={technicalReserveRows} summary={technicalReserveSummary} />
           <CableSummaryTable rows={filteredCableRows} />
           <SectorSummaryTable rows={filteredRows} validationCount={result?.validation.length ?? 0} />
         </div>
@@ -364,11 +378,14 @@ function InstallationSection({
   onSettingsChange: Record<keyof InstallationSettings, (value: number) => void>;
 }) {
   return (
-    <section className="mt-5 border border-[#d8dee6] bg-white">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#d8dee6] px-4 py-3">
+    <section className="mt-5 overflow-hidden rounded-lg border border-[#d8dee6] bg-white shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#d8dee6] bg-[#fbfcfd] px-4 py-3">
         <div className="flex items-center gap-2">
           <CalendarDays size={17} />
-          <h3 className="font-semibold">Instalação</h3>
+          <div>
+            <h3 className="font-semibold">Instalação</h3>
+            <p className="text-xs text-[#617080]">Prazo estimado por produtividade da equipe</p>
+          </div>
         </div>
         <label className="flex items-center gap-2 text-sm">
           <span className="font-medium">Data de inicio</span>
@@ -409,7 +426,7 @@ function InstallationSection({
         />
       </div>
 
-      <div className="border-t border-[#edf0f3] px-4 py-3">
+      <div className="border-t border-[#edf0f3] bg-[#fbfcfd] px-4 py-3">
         <label className="inline-flex items-center gap-2 text-sm text-[#617080]">
           <input
             type="checkbox"
@@ -433,14 +450,14 @@ function InstallationSection({
             </tr>
           </thead>
           <tbody>
-            <tr className="border-t border-[#edf0f3]">
+            <tr className="border-t border-[#edf0f3] hover:bg-[#fbfcfd]">
               <td className="px-4 py-3 font-medium">CEO</td>
               <td className="px-4 py-3 text-right">{numberFormatter.format(estimate.ceo.quantity)}</td>
               <td className="px-4 py-3 text-right">{estimate.capacity.ceoConservative} a {estimate.capacity.ceoOptimistic} por dia</td>
               <td className="px-4 py-3 text-right">{formatDays(estimate.ceo.conservative)}</td>
               <td className="px-4 py-3 text-right">{formatDays(estimate.ceo.optimistic)}</td>
             </tr>
-            <tr className="border-t border-[#edf0f3]">
+            <tr className="border-t border-[#edf0f3] hover:bg-[#fbfcfd]">
               <td className="px-4 py-3 font-medium">CTO</td>
               <td className="px-4 py-3 text-right">{numberFormatter.format(estimate.cto.quantity)}</td>
               <td className="px-4 py-3 text-right">{estimate.capacity.ctoConservative} a {estimate.capacity.ctoOptimistic} por dia</td>
@@ -451,9 +468,119 @@ function InstallationSection({
         </table>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 border-t border-[#edf0f3] p-4">
+      <div className="grid grid-cols-2 gap-3 border-t border-[#edf0f3] bg-[#fbfcfd] p-4">
         <InstallationScenario title="Cenário conservador" ceoDays={estimate.ceo.conservative} ctoDays={estimate.cto.conservative} totalDays={estimate.total.conservative} endDate={estimate.endDate.conservative} />
         <InstallationScenario title="Cenário otimista" ceoDays={estimate.ceo.optimistic} ctoDays={estimate.cto.optimistic} totalDays={estimate.total.optimistic} endDate={estimate.endDate.optimistic} />
+      </div>
+    </section>
+  );
+}
+
+function TechnicalReserveSection({ rows, summary }: { rows: TechnicalReserveRow[]; summary: TechnicalReserveSummaryRow[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const visibleRows = expanded ? rows : rows.slice(0, TECHNICAL_RESERVE_INITIAL_ROWS);
+  const hiddenRows = Math.max(0, rows.length - visibleRows.length);
+
+  return (
+    <section className="mt-5 overflow-hidden rounded-lg border border-[#d8dee6] bg-white shadow-sm">
+      <div className="flex items-center justify-between border-b border-[#d8dee6] bg-[#fbfcfd] px-4 py-3">
+        <div>
+          <h3 className="font-semibold">Reserva Técnica</h3>
+          <p className="text-xs text-[#617080]">Camada calculada: metragem linear + reserva operacional</p>
+        </div>
+        <span className="rounded-md border border-[#cbd3dc] bg-white px-2 py-1 text-xs font-medium text-[#526171]">
+          {RESERVA_POR_PONTO_METROS}m por ponto | tolerância {TOLERANCIA_CONEXAO_METROS}m
+        </span>
+      </div>
+      <div className="overflow-auto">
+        <table className="w-full min-w-[980px] border-collapse text-sm">
+          <thead className="bg-[#eef2f5] text-left text-xs uppercase text-[#526171]">
+            <tr>
+              <th className="px-4 py-3">Referência</th>
+              <th className="px-4 py-3">Grupo</th>
+              <th className="px-4 py-3">Cabo</th>
+              <th className="px-4 py-3">Tipo de ponto</th>
+              <th className="px-4 py-3 text-right">Qtd pontos</th>
+              <th className="px-4 py-3 text-right">Metragem linear</th>
+              <th className="px-4 py-3 text-right">Reserva</th>
+              <th className="px-4 py-3 text-right">Metragem final</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.length ? (
+              visibleRows.map((row) => (
+                <tr key={row.id} className="border-t border-[#edf0f3] hover:bg-[#fbfcfd]">
+                  <td className="px-4 py-3 font-medium" title={row.parentFolderPath}>{row.reference}</td>
+                  <td className="px-4 py-3"><Pill>{row.group}</Pill></td>
+                  <td className="px-4 py-3 font-medium">{row.cable}</td>
+                  <td className="px-4 py-3"><Pill tone="muted">{row.pointType}</Pill></td>
+                  <td className="px-4 py-3 text-right">{formatPointCount(row.quantityPoints, row.pointType)}</td>
+                  <td className="px-4 py-3 text-right">{formatMetersAndKm(row.linearMeters)}</td>
+                  <td className="px-4 py-3 text-right">{preciseMeterFormatter.format(row.reserveMeters)}m</td>
+                  <td className="px-4 py-3 text-right font-semibold">{formatMetersAndKm(row.finalMeters)}</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td className="px-4 py-8 text-center text-[#617080]" colSpan={8}>
+                  Nenhum cabo com reserva técnica para os filtros selecionados.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {rows.length > TECHNICAL_RESERVE_INITIAL_ROWS && (
+        <div className="flex items-center justify-between border-t border-[#edf0f3] bg-[#fbfcfd] px-4 py-3">
+          <span className="text-sm text-[#617080]">
+            Exibindo {numberFormatter.format(visibleRows.length)} de {numberFormatter.format(rows.length)} cabo(s)
+          </span>
+          <button
+            type="button"
+            className="rounded-md border border-[#cbd3dc] bg-white px-3 py-2 text-sm font-medium hover:bg-[#eef2f5]"
+            onClick={() => setExpanded((current) => !current)}
+          >
+            {expanded ? 'Mostrar menos' : `Mostrar mais ${numberFormatter.format(hiddenRows)}`}
+          </button>
+        </div>
+      )}
+
+      <div className="border-t border-[#edf0f3] bg-[#fbfcfd] px-4 py-3">
+        <h4 className="font-semibold">Resumo por tipo de cabo</h4>
+        <div className="mt-3 overflow-auto">
+          <table className="w-full min-w-[760px] border-collapse text-sm">
+            <thead className="bg-[#eef2f5] text-left text-xs uppercase text-[#526171]">
+              <tr>
+                <th className="px-4 py-3">Cabo</th>
+                <th className="px-4 py-3">Grupo</th>
+                <th className="px-4 py-3 text-right">Qtd pontos</th>
+                <th className="px-4 py-3 text-right">Reserva total</th>
+                <th className="px-4 py-3 text-right">Metragem linear</th>
+                <th className="px-4 py-3 text-right">Metragem final</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summary.length ? (
+                summary.map((row) => (
+                  <tr key={`${row.group}-${row.cable}`} className="border-t border-[#edf0f3] hover:bg-white">
+                    <td className="px-4 py-3 font-medium">{row.cable}</td>
+                    <td className="px-4 py-3"><Pill>{row.group}</Pill></td>
+                    <td className="px-4 py-3 text-right">{formatPointCount(row.quantityPoints, row.pointType)}</td>
+                    <td className="px-4 py-3 text-right">{preciseMeterFormatter.format(row.reserveMeters)}m</td>
+                    <td className="px-4 py-3 text-right">{formatMetersAndKm(row.linearMeters)}</td>
+                    <td className="px-4 py-3 text-right font-semibold">{formatMetersAndKm(row.finalMeters)}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="px-4 py-6 text-center text-[#617080]" colSpan={6}>
+                    Nenhuma reserva para resumir.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
   );
@@ -541,14 +668,22 @@ function InstallationNumberInput({
   );
 }
 
+function Pill({ children, tone = 'default' }: { children: ReactNode; tone?: 'default' | 'muted' }) {
+  const className =
+    tone === 'muted'
+      ? 'inline-flex min-w-14 justify-center rounded-md bg-[#eef2f5] px-2 py-1 text-xs font-semibold text-[#526171]'
+      : 'inline-flex min-w-20 justify-center rounded-md bg-[#dce8f2] px-2 py-1 text-xs font-semibold text-[#17324a]';
+  return <span className={className}>{children}</span>;
+}
+
 function InstallationInfoCard({ label, value, icon }: { label: string; value: string | number; icon?: ReactNode }) {
   return (
-    <div className="min-h-24 border border-[#d8dee6] bg-[#fbfcfd] p-3">
+    <div className="min-h-24 rounded-md border border-[#d8dee6] bg-[#fbfcfd] p-3">
       <div className="flex items-center gap-2 text-xs font-semibold uppercase text-[#617080]">
         {icon}
         <span>{label}</span>
       </div>
-      <p className="mt-3 text-xl font-semibold leading-snug">{typeof value === 'number' ? numberFormatter.format(value) : value}</p>
+      <p className="mt-3 text-xl font-semibold leading-snug text-[#17324a]">{typeof value === 'number' ? numberFormatter.format(value) : value}</p>
     </div>
   );
 }
@@ -567,15 +702,15 @@ function InstallationScenario({
   endDate: string;
 }) {
   return (
-    <div className="border border-[#d8dee6] bg-[#fbfcfd] p-4">
-      <h4 className="font-semibold">{title}</h4>
+    <div className="rounded-md border border-[#d8dee6] bg-white p-4">
+      <h4 className="font-semibold text-[#17324a]">{title}</h4>
       <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
         <dt className="text-[#617080]">CEO</dt>
         <dd className="text-right font-medium">{formatDays(ceoDays)}</dd>
         <dt className="text-[#617080]">CTO</dt>
         <dd className="text-right font-medium">{formatDays(ctoDays)}</dd>
-        <dt className="text-[#617080]">Total</dt>
-        <dd className="text-right font-medium">{formatDays(totalDays)}</dd>
+        <dt className="border-t border-[#edf0f3] pt-2 text-[#617080]">Total</dt>
+        <dd className="border-t border-[#edf0f3] pt-2 text-right font-semibold">{formatDays(totalDays)}</dd>
         <dt className="text-[#617080]">Data final estimada</dt>
         <dd className="text-right font-medium">{endDate || '-'}</dd>
       </dl>
@@ -630,10 +765,13 @@ function TreeView({
 
 function CableSummaryTable({ rows }: { rows: CableSummaryRow[] }) {
   return (
-    <section className="mt-5 border border-[#d8dee6] bg-white">
-      <div className="flex items-center justify-between border-b border-[#d8dee6] px-4 py-3">
-        <h3 className="font-semibold">Resumo de cabos</h3>
-        <span className="text-xs text-[#617080]">SETOR | GRUPO | CABO | QUANTIDADE | METROS | KM</span>
+    <section className="mt-5 overflow-hidden rounded-lg border border-[#d8dee6] bg-white shadow-sm">
+      <div className="flex items-center justify-between border-b border-[#d8dee6] bg-[#fbfcfd] px-4 py-3">
+        <div>
+          <h3 className="font-semibold">Resumo de cabos</h3>
+          <p className="text-xs text-[#617080]">Metragem linear original por setor, grupo e tipo de cabo</p>
+        </div>
+        <span className="rounded-md border border-[#cbd3dc] bg-white px-2 py-1 text-xs font-medium text-[#526171]">{numberFormatter.format(rows.length)} linha(s)</span>
       </div>
       <div className="overflow-auto">
         <table className="w-full min-w-[860px] border-collapse text-sm">
@@ -650,10 +788,10 @@ function CableSummaryTable({ rows }: { rows: CableSummaryRow[] }) {
           <tbody>
             {rows.length ? (
               rows.map((row) => (
-                <tr key={`${row.sector}-${row.group}-${row.cable}`} className="border-t border-[#edf0f3]">
+                <tr key={`${row.sector}-${row.group}-${row.cable}`} className="border-t border-[#edf0f3] hover:bg-[#fbfcfd]">
                   <td className="px-4 py-3 font-medium">{row.sector}</td>
-                  <td className="px-4 py-3">{row.group}</td>
-                  <td className="px-4 py-3">{row.cable}</td>
+                  <td className="px-4 py-3"><Pill>{row.group}</Pill></td>
+                  <td className="px-4 py-3 font-medium">{row.cable}</td>
                   <td className="px-4 py-3 text-right">{numberFormatter.format(row.quantity)}</td>
                   <td className="px-4 py-3 text-right">{preciseMeterFormatter.format(row.meters)}m</td>
                   <td className="px-4 py-3 text-right">{preciseKmFormatter.format(row.km)}km</td>
@@ -675,9 +813,12 @@ function CableSummaryTable({ rows }: { rows: CableSummaryRow[] }) {
 
 function SectorSummaryTable({ rows, validationCount }: { rows: SummaryRow[]; validationCount: number }) {
   return (
-    <section className="mt-5 border border-[#d8dee6] bg-white">
-      <div className="flex items-center justify-between border-b border-[#d8dee6] px-4 py-3">
-        <h3 className="font-semibold">Resumo por setor</h3>
+    <section className="mt-5 overflow-hidden rounded-lg border border-[#d8dee6] bg-white shadow-sm">
+      <div className="flex items-center justify-between border-b border-[#d8dee6] bg-[#fbfcfd] px-4 py-3">
+        <div>
+          <h3 className="font-semibold">Resumo por setor</h3>
+          <p className="text-xs text-[#617080]">Quantidades e metragem base sem reserva técnica</p>
+        </div>
         <div className="flex items-center gap-2 text-xs text-[#617080]">
           <ShieldCheck size={15} />
           {validationCount} item(ns) ignorado(s) por geometria incompatível
@@ -697,9 +838,9 @@ function SectorSummaryTable({ rows, validationCount }: { rows: SummaryRow[]; val
           <tbody>
             {rows.length ? (
               rows.map((row) => (
-                <tr key={`${row.sector}-${row.type}`} className="border-t border-[#edf0f3]">
+                <tr key={`${row.sector}-${row.type}`} className="border-t border-[#edf0f3] hover:bg-[#fbfcfd]">
                   <td className="px-4 py-3 font-medium">{row.sector}</td>
-                  <td className="px-4 py-3">{row.type}</td>
+                  <td className="px-4 py-3"><Pill tone="muted">{row.type}</Pill></td>
                   <td className="px-4 py-3 text-right">{numberFormatter.format(row.quantity)}</td>
                   <td className="px-4 py-3 text-right">{row.meters > 0 ? `${meterFormatter.format(row.meters)}m` : '-'}</td>
                   <td className="px-4 py-3 text-right">{row.km > 0 ? `${kmFormatter.format(row.km)}km` : '-'}</td>
@@ -721,9 +862,9 @@ function SectorSummaryTable({ rows, validationCount }: { rows: SummaryRow[]; val
 
 function MetricCard({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="min-h-24 border border-[#d8dee6] bg-white p-3">
+    <div className="min-h-24 rounded-lg border border-[#d8dee6] bg-white p-3 shadow-sm">
       <p className="text-xs font-semibold uppercase text-[#617080]">{label}</p>
-      <p className="mt-3 truncate text-2xl font-semibold">{typeof value === 'number' ? numberFormatter.format(value) : value}</p>
+      <p className="mt-3 truncate text-2xl font-semibold text-[#17324a]">{typeof value === 'number' ? numberFormatter.format(value) : value}</p>
     </div>
   );
 }
@@ -827,7 +968,7 @@ function summarizeCableItems(items: AnalyzedItem[]): CableSummaryRow[] {
 
 function buildCableTotals(rows: CableSummaryRow[]) {
   const totals = {
-    RAMAIS: { quantity: 0, meters: 0, km: 0 },
+    RAMAL: { quantity: 0, meters: 0, km: 0 },
     BACKBONE: { quantity: 0, meters: 0, km: 0 },
   };
 
@@ -838,6 +979,259 @@ function buildCableTotals(rows: CableSummaryRow[]) {
   }
 
   return totals;
+}
+
+interface TechnicalReservePoint {
+  id: string;
+  name: string;
+  type: 'CTO' | 'CEO';
+  distanceMeters: number;
+}
+
+interface IgnoredTechnicalReservePoint {
+  id: string;
+  name: string;
+  type: 'CTO' | 'CEO';
+  reason: string;
+}
+
+interface TechnicalReserveRow {
+  id: string;
+  name: string;
+  sector: string;
+  reference: string;
+  parentFolderName: string;
+  parentFolderPath: string;
+  indexInsideParentFolder: number;
+  group: CableGroup;
+  cable: CableType;
+  fullPath: string;
+  pointType: 'CTO' | 'CEO';
+  validPoints: TechnicalReservePoint[];
+  ignoredPoints: IgnoredTechnicalReservePoint[];
+  quantityPoints: number;
+  linearMeters: number;
+  reserveMeters: number;
+  finalMeters: number;
+}
+
+interface TechnicalReserveSummaryRow {
+  cable: CableType;
+  group: CableGroup;
+  pointType: 'CTO' | 'CEO';
+  quantityPoints: number;
+  reserveMeters: number;
+  linearMeters: number;
+  finalMeters: number;
+}
+
+function calculateTechnicalReserve(items: AnalyzedItem[]): TechnicalReserveRow[] {
+  const points = items.filter((item): item is AnalyzedItem & { type: 'CTO' | 'CEO' } => (item.type === 'CTO' || item.type === 'CEO') && item.coordinates.length > 0);
+  const rows: TechnicalReserveRow[] = [];
+  const indexesByParentPath = new Map<string, number>();
+
+  for (const cable of items) {
+    if (!cable.cableGroup || !cable.cableType || cable.coordinates.length < 2) continue;
+
+    const parentReference = buildCableParentReference(cable);
+    const nextIndex = (indexesByParentPath.get(parentReference.parentFolderPath) ?? 0) + 1;
+    indexesByParentPath.set(parentReference.parentFolderPath, nextIndex);
+
+    try {
+      const allowedPointTypes = cable.allowedPointTypes ?? [];
+      const ignoredPointTypes = cable.ignoredPointTypes ?? [];
+      const validPoints: TechnicalReservePoint[] = [];
+      const ignoredPoints: IgnoredTechnicalReservePoint[] = [];
+      const countedKeys = new Set<string>();
+
+      for (const point of points) {
+        const pointCoordinate = point.coordinates[0];
+        const distanceMeters = distancePointToLineStringMeters(pointCoordinate, cable.coordinates);
+        if (distanceMeters > TOLERANCIA_CONEXAO_METROS) continue;
+
+        const uniqueKey = `${cable.id}:${point.id}`;
+        if (countedKeys.has(uniqueKey)) continue;
+        countedKeys.add(uniqueKey);
+
+        if (allowedPointTypes.includes(point.type)) {
+          validPoints.push({
+            id: point.id,
+            name: point.name,
+            type: point.type,
+            distanceMeters,
+          });
+          continue;
+        }
+
+        if (ignoredPointTypes.includes(point.type)) {
+          ignoredPoints.push({
+            id: point.id,
+            name: point.name,
+            type: point.type,
+            reason: `${point.type} ignorado para ${cable.cableGroup}`,
+          });
+        }
+      }
+
+      const quantityPoints = validPoints.length;
+      const reserveMeters = quantityPoints * RESERVA_POR_PONTO_METROS;
+      rows.push({
+        id: cable.id,
+        name: cable.name,
+        sector: cable.sector,
+        reference: `${parentReference.parentFolderName}.${nextIndex}`,
+        parentFolderName: parentReference.parentFolderName,
+        parentFolderPath: parentReference.parentFolderPath,
+        indexInsideParentFolder: nextIndex,
+        group: cable.cableGroup,
+        cable: cable.cableType,
+        fullPath: cable.fullPath,
+        pointType: cable.cableGroup === 'RAMAL' ? 'CTO' : 'CEO',
+        validPoints,
+        ignoredPoints,
+        quantityPoints,
+        linearMeters: cable.meters,
+        reserveMeters,
+        finalMeters: cable.meters + reserveMeters,
+      });
+    } catch {
+      rows.push({
+        id: cable.id,
+        name: cable.name,
+        sector: cable.sector,
+        reference: `${parentReference.parentFolderName}.${nextIndex}`,
+        parentFolderName: parentReference.parentFolderName,
+        parentFolderPath: parentReference.parentFolderPath,
+        indexInsideParentFolder: nextIndex,
+        group: cable.cableGroup,
+        cable: cable.cableType,
+        fullPath: cable.fullPath,
+        pointType: cable.cableGroup === 'RAMAL' ? 'CTO' : 'CEO',
+        validPoints: [],
+        ignoredPoints: [],
+        quantityPoints: 0,
+        linearMeters: cable.meters,
+        reserveMeters: 0,
+        finalMeters: cable.meters,
+      });
+    }
+  }
+
+  return rows.sort((a, b) => {
+    const sectorSort = a.sector.localeCompare(b.sector);
+    if (sectorSort !== 0) return sectorSort;
+    const groupSort = a.group.localeCompare(b.group);
+    if (groupSort !== 0) return groupSort;
+    return CABLE_TYPES.indexOf(a.cable) - CABLE_TYPES.indexOf(b.cable);
+  });
+}
+
+function buildTechnicalReserveSummary(rows: TechnicalReserveRow[]): TechnicalReserveSummaryRow[] {
+  const grouped = new Map<string, TechnicalReserveSummaryRow>();
+
+  for (const row of rows) {
+    const key = `${row.group}:${row.cable}`;
+    const current = grouped.get(key) ?? {
+      cable: row.cable,
+      group: row.group,
+      pointType: row.pointType,
+      quantityPoints: 0,
+      reserveMeters: 0,
+      linearMeters: 0,
+      finalMeters: 0,
+    };
+    current.quantityPoints += row.quantityPoints;
+    current.reserveMeters += row.reserveMeters;
+    current.linearMeters += row.linearMeters;
+    current.finalMeters += row.finalMeters;
+    grouped.set(key, current);
+  }
+
+  return Array.from(grouped.values()).sort((a, b) => {
+    const groupSort = a.group.localeCompare(b.group);
+    if (groupSort !== 0) return groupSort;
+    return CABLE_TYPES.indexOf(a.cable) - CABLE_TYPES.indexOf(b.cable);
+  });
+}
+
+function buildCableParentReference(cable: AnalyzedItem): { parentFolderName: string; parentFolderPath: string } {
+  if (cable.parentFolder) {
+    return {
+      parentFolderName: cable.parentFolder,
+      parentFolderPath: cable.ancestors.join(' > ') || cable.parentFolder,
+    };
+  }
+
+  const cabosIndex = cable.ancestors.findIndex((ancestor) => ancestor.toUpperCase() === 'CABOS');
+  const fallbackFolder = cabosIndex >= 0 ? cable.ancestors[cabosIndex + 1] : undefined;
+  if (fallbackFolder) {
+    return {
+      parentFolderName: fallbackFolder,
+      parentFolderPath: cable.ancestors.slice(0, cabosIndex + 2).join(' > '),
+    };
+  }
+
+  if (cable.sector) {
+    return {
+      parentFolderName: cable.sector,
+      parentFolderPath: cable.sector,
+    };
+  }
+
+  return {
+    parentFolderName: 'SEM REFERÊNCIA',
+    parentFolderPath: 'SEM REFERÊNCIA',
+  };
+}
+
+function distancePointToLineStringMeters(point: Coordinate, lineCoordinates: Coordinate[]): number {
+  let shortestDistance = Number.POSITIVE_INFINITY;
+
+  for (let index = 1; index < lineCoordinates.length; index += 1) {
+    shortestDistance = Math.min(shortestDistance, distancePointToSegmentMeters(point, lineCoordinates[index - 1], lineCoordinates[index]));
+  }
+
+  return shortestDistance;
+}
+
+function distancePointToSegmentMeters(point: Coordinate, start: Coordinate, end: Coordinate): number {
+  const originLatRadians = toRadians((point.lat + start.lat + end.lat) / 3);
+  const pointXY = coordinateToLocalMeters(point, originLatRadians);
+  const startXY = coordinateToLocalMeters(start, originLatRadians);
+  const endXY = coordinateToLocalMeters(end, originLatRadians);
+  const segmentX = endXY.x - startXY.x;
+  const segmentY = endXY.y - startXY.y;
+  const segmentLengthSquared = segmentX * segmentX + segmentY * segmentY;
+
+  if (segmentLengthSquared === 0) {
+    return Math.hypot(pointXY.x - startXY.x, pointXY.y - startXY.y);
+  }
+
+  const projection = ((pointXY.x - startXY.x) * segmentX + (pointXY.y - startXY.y) * segmentY) / segmentLengthSquared;
+  const clampedProjection = Math.max(0, Math.min(1, projection));
+  const closestX = startXY.x + clampedProjection * segmentX;
+  const closestY = startXY.y + clampedProjection * segmentY;
+  return Math.hypot(pointXY.x - closestX, pointXY.y - closestY);
+}
+
+function coordinateToLocalMeters(coordinate: Coordinate, originLatRadians: number): { x: number; y: number } {
+  const earthRadiusMeters = 6371008.8;
+  return {
+    x: toRadians(coordinate.lng) * earthRadiusMeters * Math.cos(originLatRadians),
+    y: toRadians(coordinate.lat) * earthRadiusMeters,
+  };
+}
+
+function toRadians(value: number): number {
+  return (value * Math.PI) / 180;
+}
+
+function formatMetersAndKm(meters: number): string {
+  return `${preciseMeterFormatter.format(meters)}m / ${preciseKmFormatter.format(meters / 1000)}km`;
+}
+
+function formatPointCount(quantity: number, pointType: 'CTO' | 'CEO'): string {
+  return `${numberFormatter.format(quantity)} ${pointType}${quantity === 1 ? '' : 's'}`;
 }
 
 interface InstallationSettings {

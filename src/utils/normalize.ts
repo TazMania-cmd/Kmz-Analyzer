@@ -1,5 +1,4 @@
-import type { CountType } from '../types';
-import type { CableType } from '../types';
+import type { CableGroup, CableType, CountType } from '../types';
 
 const EXACT_FOLDER_TYPES: Record<string, CountType | 'CABOS'> = {
   CTO: 'CTO',
@@ -51,4 +50,51 @@ export function identifyCableType(value: string): CableType | undefined {
   if (fiberCount === '72') return 'CABO 72 F.O';
   if (fiberCount === '144') return 'CABO 144 F.O';
   return undefined;
+}
+
+const SERVICE_MATRIX: Record<CableGroup, { allowedPointTypes: CountType[]; ignoredPointTypes: CountType[] }> = {
+  RAMAL: {
+    allowedPointTypes: ['CTO'],
+    ignoredPointTypes: ['CEO'],
+  },
+  BACKBONE: {
+    allowedPointTypes: ['CEO'],
+    ignoredPointTypes: ['CTO'],
+  },
+};
+
+export function detectCableType(value: string): CableType | 'UNKNOWN' {
+  return identifyCableType(value) ?? 'UNKNOWN';
+}
+
+export function detectCableGroupFromPath(fullPath: string, ancestors: string[] = [], parentFolder = '', name = ''): CableGroup | undefined {
+  const pathParts = [...ancestors, parentFolder, name].filter(Boolean).map(normalizeName);
+  const normalizedPath = normalizeName(fullPath);
+
+  if (pathParts.includes('BACKBONE') || normalizedPath.includes('BACKBONE')) {
+    return 'BACKBONE';
+  }
+
+  if (pathParts.includes('RAMAIS') || pathParts.includes('RAMAL') || normalizedPath.includes('RAMAIS') || normalizedPath.includes('RAMAL')) {
+    return 'RAMAL';
+  }
+
+  const cabosIndex = pathParts.indexOf('CABOS');
+  if (cabosIndex >= 0 && pathParts.slice(cabosIndex + 1).some((part) => identifyCableType(part) === 'CABO 06 F.O')) {
+    return 'RAMAL';
+  }
+
+  if (normalizedPath.includes('CABOS 06 F O') || normalizedPath.includes('CABOS 6 F O')) {
+    return 'RAMAL';
+  }
+
+  return undefined;
+}
+
+export function getAllowedPointTypesByCableGroup(group: CableGroup | undefined): CountType[] {
+  return group ? SERVICE_MATRIX[group].allowedPointTypes : [];
+}
+
+export function getIgnoredPointTypesByCableGroup(group: CableGroup | undefined): CountType[] {
+  return group ? SERVICE_MATRIX[group].ignoredPointTypes : [];
 }

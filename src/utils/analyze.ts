@@ -3,6 +3,7 @@ import type {
   AnalyzedItem,
   AnalysisResult,
   CableSummaryRow,
+  Coordinate,
   CountType,
   FolderContext,
   GeometryType,
@@ -12,7 +13,14 @@ import type {
   UnknownFolder,
 } from '../types';
 import { lineLengthMeters, parseCoordinates } from './distance';
-import { classifyExactFolder, identifyCableType, isProjectRootName } from './normalize';
+import {
+  classifyExactFolder,
+  detectCableGroupFromPath,
+  getAllowedPointTypesByCableGroup,
+  getIgnoredPointTypesByCableGroup,
+  identifyCableType,
+  isProjectRootName,
+} from './normalize';
 
 const LINE_TYPES: CountType[] = ['RAMAIS', 'BACKBONE', 'CORDOALHAS'];
 const POINT_TYPES: CountType[] = ['CTO', 'CEO', 'POSTES'];
@@ -234,22 +242,31 @@ function processPlacemark(
     return;
   }
 
-  const meters = LINE_TYPES.includes(params.context.type) ? getLineStringLength(placemark) : 0;
-  const cableGroup = params.context.type === 'RAMAIS' || params.context.type === 'BACKBONE' ? params.context.type : undefined;
-  const cableType = cableGroup ? identifyCableType(`${params.path} > ${name}`) : undefined;
+  const coordinates = getPlacemarkCoordinates(placemark, geometryType);
+  const meters = LINE_TYPES.includes(params.context.type) ? lineLengthMeters(coordinates) : 0;
+  const fullPath = `${params.path} > ${name}`;
+  const cableType = params.context.type === 'RAMAIS' || params.context.type === 'BACKBONE' ? identifyCableType(fullPath) : undefined;
+  const detectedCableGroup = cableType ? detectCableGroupFromPath(fullPath, params.ancestors, params.ancestors[params.ancestors.length - 1], name) : undefined;
+  const cableGroup = detectedCableGroup ?? (params.context.type === 'RAMAIS' ? 'RAMAL' : params.context.type === 'BACKBONE' ? 'BACKBONE' : undefined);
+  const allowedPointTypes = cableGroup ? getAllowedPointTypesByCableGroup(cableGroup) : undefined;
+  const ignoredPointTypes = cableGroup ? getIgnoredPointTypesByCableGroup(cableGroup) : undefined;
   const sector = params.context.sector ?? firstSectorFromAncestors(params.ancestors) ?? 'Sem setor';
   const item: AnalyzedItem = {
-    id: `${params.path} > ${name}`,
+    id: fullPath,
     name,
     geometryType,
     parentFolder: params.ancestors[params.ancestors.length - 1] ?? '',
     ancestors: [...params.ancestors],
-    fullPath: `${params.path} > ${name}`,
+    fullPath,
     sector,
     type: params.context.type,
     meters,
+    coordinates,
     cableGroup,
     cableType,
+    cableFunction: cableGroup,
+    allowedPointTypes,
+    ignoredPointTypes,
   };
   params.state.items.push(item);
 }
@@ -277,6 +294,18 @@ function countFolderGeometries(element: Element): { pointCount: number; lineStri
   }
 
   return counts;
+}
+
+function getPlacemarkCoordinates(placemark: Element, geometryType: GeometryType): Coordinate[] {
+  const coordinates: Coordinate[] = [];
+  const geometryName = geometryType === 'Point' ? 'Point' : 'LineString';
+  for (const geometry of findDescendants(placemark, geometryName)) {
+    const coordinatesText = getChildText(geometry, 'coordinates');
+    if (coordinatesText) {
+      coordinates.push(...parseCoordinates(coordinatesText));
+    }
+  }
+  return coordinates;
 }
 
 function getLineStringLength(placemark: Element): number {
