@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
+  CalendarDays,
   ChevronDown,
   ChevronRight,
   Download,
@@ -12,6 +13,7 @@ import {
   Network,
   ShieldCheck,
   Upload,
+  Users,
   X,
 } from 'lucide-react';
 import type {
@@ -38,6 +40,13 @@ const meterFormatter = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0
 const kmFormatter = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const preciseMeterFormatter = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const preciseKmFormatter = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+const DEFAULT_INSTALLATION_SETTINGS = {
+  technicians: 7,
+  ceoConservative: 3,
+  ceoOptimistic: 4,
+  ctoConservative: 5,
+  ctoOptimistic: 10,
+};
 
 export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -52,6 +61,13 @@ export default function App() {
   const [error, setError] = useState('');
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [selectedFolderPath, setSelectedFolderPath] = useState('');
+  const [installationStartDate, setInstallationStartDate] = useState('');
+  const [installationTechnicians, setInstallationTechnicians] = useState(DEFAULT_INSTALLATION_SETTINGS.technicians);
+  const [installationCeoConservative, setInstallationCeoConservative] = useState(DEFAULT_INSTALLATION_SETTINGS.ceoConservative);
+  const [installationCeoOptimistic, setInstallationCeoOptimistic] = useState(DEFAULT_INSTALLATION_SETTINGS.ceoOptimistic);
+  const [installationCtoConservative, setInstallationCtoConservative] = useState(DEFAULT_INSTALLATION_SETTINGS.ctoConservative);
+  const [installationCtoOptimistic, setInstallationCtoOptimistic] = useState(DEFAULT_INSTALLATION_SETTINGS.ctoOptimistic);
+  const [installationBusinessDaysOnly, setInstallationBusinessDaysOnly] = useState(false);
 
   const sectors = useMemo(() => {
     if (!result) return [];
@@ -82,6 +98,34 @@ export default function App() {
 
   const totals = useMemo(() => buildTotals(filteredRows), [filteredRows]);
   const cableTotals = useMemo(() => buildCableTotals(filteredCableRows), [filteredCableRows]);
+  const installationRows = useMemo(() => {
+    return summarizeItems(scopedItems).filter((row) => sectorFilter === 'TODOS' || row.sector === sectorFilter);
+  }, [scopedItems, sectorFilter]);
+  const installationEstimate = useMemo(() => {
+    const installationTotals = buildTotals(installationRows);
+    return calculateInstallation({
+      totalCEO: installationTotals.CEO.quantity,
+      totalCTO: installationTotals.CTO.quantity,
+      startDate: installationStartDate,
+      businessDaysOnly: installationBusinessDaysOnly,
+      settings: {
+        technicians: installationTechnicians,
+        ceoConservative: installationCeoConservative,
+        ceoOptimistic: installationCeoOptimistic,
+        ctoConservative: installationCtoConservative,
+        ctoOptimistic: installationCtoOptimistic,
+      },
+    });
+  }, [
+    installationRows,
+    installationStartDate,
+    installationBusinessDaysOnly,
+    installationTechnicians,
+    installationCeoConservative,
+    installationCeoOptimistic,
+    installationCtoConservative,
+    installationCtoOptimistic,
+  ]);
 
   async function runAnalysis(nextFile: File, nextMappings: ManualMappings = mappings) {
     setLoading(true);
@@ -273,10 +317,268 @@ export default function App() {
             </section>
           )}
 
+          <InstallationSection
+            estimate={installationEstimate}
+            startDate={installationStartDate}
+            onStartDateChange={setInstallationStartDate}
+            businessDaysOnly={installationBusinessDaysOnly}
+            onBusinessDaysOnlyChange={setInstallationBusinessDaysOnly}
+            settings={{
+              technicians: installationTechnicians,
+              ceoConservative: installationCeoConservative,
+              ceoOptimistic: installationCeoOptimistic,
+              ctoConservative: installationCtoConservative,
+              ctoOptimistic: installationCtoOptimistic,
+            }}
+            onSettingsChange={{
+              technicians: setInstallationTechnicians,
+              ceoConservative: setInstallationCeoConservative,
+              ceoOptimistic: setInstallationCeoOptimistic,
+              ctoConservative: setInstallationCtoConservative,
+              ctoOptimistic: setInstallationCtoOptimistic,
+            }}
+          />
           <CableSummaryTable rows={filteredCableRows} />
           <SectorSummaryTable rows={filteredRows} validationCount={result?.validation.length ?? 0} />
         </div>
       </main>
+    </div>
+  );
+}
+
+function InstallationSection({
+  estimate,
+  startDate,
+  onStartDateChange,
+  businessDaysOnly,
+  onBusinessDaysOnlyChange,
+  settings,
+  onSettingsChange,
+}: {
+  estimate: InstallationEstimate;
+  startDate: string;
+  onStartDateChange: (value: string) => void;
+  businessDaysOnly: boolean;
+  onBusinessDaysOnlyChange: (value: boolean) => void;
+  settings: InstallationSettings;
+  onSettingsChange: Record<keyof InstallationSettings, (value: number) => void>;
+}) {
+  return (
+    <section className="mt-5 border border-[#d8dee6] bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#d8dee6] px-4 py-3">
+        <div className="flex items-center gap-2">
+          <CalendarDays size={17} />
+          <h3 className="font-semibold">Instalação</h3>
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <span className="font-medium">Data de inicio</span>
+          <input
+            type="date"
+            className="h-9 rounded-md border border-[#cbd3dc] bg-white px-2"
+            value={startDate}
+            onChange={(event) => onStartDateChange(event.target.value)}
+          />
+        </label>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3 p-4">
+        <InstallationInputCard
+          label="Técnicos disponíveis"
+          icon={<Users size={18} />}
+          value={settings.technicians}
+          defaultValue={DEFAULT_INSTALLATION_SETTINGS.technicians}
+          onChange={onSettingsChange.technicians}
+        />
+        <InstallationRangeInputCard
+          label="CEO por técnico/dia"
+          conservativeValue={settings.ceoConservative}
+          optimisticValue={settings.ceoOptimistic}
+          conservativeDefault={DEFAULT_INSTALLATION_SETTINGS.ceoConservative}
+          optimisticDefault={DEFAULT_INSTALLATION_SETTINGS.ceoOptimistic}
+          onConservativeChange={onSettingsChange.ceoConservative}
+          onOptimisticChange={onSettingsChange.ceoOptimistic}
+        />
+        <InstallationRangeInputCard
+          label="CTO por técnico/dia"
+          conservativeValue={settings.ctoConservative}
+          optimisticValue={settings.ctoOptimistic}
+          conservativeDefault={DEFAULT_INSTALLATION_SETTINGS.ctoConservative}
+          optimisticDefault={DEFAULT_INSTALLATION_SETTINGS.ctoOptimistic}
+          onConservativeChange={onSettingsChange.ctoConservative}
+          onOptimisticChange={onSettingsChange.ctoOptimistic}
+        />
+      </div>
+
+      <div className="border-t border-[#edf0f3] px-4 py-3">
+        <label className="inline-flex items-center gap-2 text-sm text-[#617080]">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-[#cbd3dc]"
+            checked={businessDaysOnly}
+            onChange={(event) => onBusinessDaysOnlyChange(event.target.checked)}
+          />
+          Considerar apenas dias úteis
+        </label>
+      </div>
+
+      <div className="overflow-auto border-t border-[#edf0f3]">
+        <table className="w-full min-w-[760px] border-collapse text-sm">
+          <thead className="bg-[#eef2f5] text-left text-xs uppercase text-[#526171]">
+            <tr>
+              <th className="px-4 py-3">Etapa</th>
+              <th className="px-4 py-3 text-right">Quantidade</th>
+              <th className="px-4 py-3 text-right">Produtividade/dia</th>
+              <th className="px-4 py-3 text-right">Dias conservador</th>
+              <th className="px-4 py-3 text-right">Dias otimista</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="border-t border-[#edf0f3]">
+              <td className="px-4 py-3 font-medium">CEO</td>
+              <td className="px-4 py-3 text-right">{numberFormatter.format(estimate.ceo.quantity)}</td>
+              <td className="px-4 py-3 text-right">{estimate.capacity.ceoConservative} a {estimate.capacity.ceoOptimistic} por dia</td>
+              <td className="px-4 py-3 text-right">{formatDays(estimate.ceo.conservative)}</td>
+              <td className="px-4 py-3 text-right">{formatDays(estimate.ceo.optimistic)}</td>
+            </tr>
+            <tr className="border-t border-[#edf0f3]">
+              <td className="px-4 py-3 font-medium">CTO</td>
+              <td className="px-4 py-3 text-right">{numberFormatter.format(estimate.cto.quantity)}</td>
+              <td className="px-4 py-3 text-right">{estimate.capacity.ctoConservative} a {estimate.capacity.ctoOptimistic} por dia</td>
+              <td className="px-4 py-3 text-right">{formatDays(estimate.cto.conservative)}</td>
+              <td className="px-4 py-3 text-right">{formatDays(estimate.cto.optimistic)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 border-t border-[#edf0f3] p-4">
+        <InstallationScenario title="Cenário conservador" ceoDays={estimate.ceo.conservative} ctoDays={estimate.cto.conservative} totalDays={estimate.total.conservative} endDate={estimate.endDate.conservative} />
+        <InstallationScenario title="Cenário otimista" ceoDays={estimate.ceo.optimistic} ctoDays={estimate.cto.optimistic} totalDays={estimate.total.optimistic} endDate={estimate.endDate.optimistic} />
+      </div>
+    </section>
+  );
+}
+
+function InstallationInputCard({
+  label,
+  value,
+  defaultValue,
+  onChange,
+  icon,
+}: {
+  label: string;
+  value: number;
+  defaultValue: number;
+  onChange: (value: number) => void;
+  icon?: ReactNode;
+}) {
+  return (
+    <div className="min-h-24 border border-[#d8dee6] bg-[#fbfcfd] p-3">
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase text-[#617080]">
+        {icon}
+        <span>{label}</span>
+      </div>
+      <InstallationNumberInput className="mt-3 w-24" value={value} defaultValue={defaultValue} onChange={onChange} />
+    </div>
+  );
+}
+
+function InstallationRangeInputCard({
+  label,
+  conservativeValue,
+  optimisticValue,
+  conservativeDefault,
+  optimisticDefault,
+  onConservativeChange,
+  onOptimisticChange,
+}: {
+  label: string;
+  conservativeValue: number;
+  optimisticValue: number;
+  conservativeDefault: number;
+  optimisticDefault: number;
+  onConservativeChange: (value: number) => void;
+  onOptimisticChange: (value: number) => void;
+}) {
+  return (
+    <div className="min-h-24 border border-[#d8dee6] bg-[#fbfcfd] p-3">
+      <p className="text-xs font-semibold uppercase text-[#617080]">{label}</p>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <label className="min-w-0 text-xs font-medium text-[#617080]">
+          Conservador
+          <InstallationNumberInput className="mt-1 w-full" value={conservativeValue} defaultValue={conservativeDefault} onChange={onConservativeChange} />
+        </label>
+        <label className="min-w-0 text-xs font-medium text-[#617080]">
+          Otimista
+          <InstallationNumberInput className="mt-1 w-full" value={optimisticValue} defaultValue={optimisticDefault} onChange={onOptimisticChange} />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function InstallationNumberInput({
+  value,
+  defaultValue,
+  onChange,
+  className,
+}: {
+  value: number;
+  defaultValue: number;
+  onChange: (value: number) => void;
+  className?: string;
+}) {
+  return (
+    <input
+      type="number"
+      min={1}
+      step={1}
+      className={`h-9 rounded-md border border-[#cbd3dc] bg-white px-2 text-sm font-semibold ${className ?? ''}`}
+      value={value}
+      onChange={(event) => onChange(normalizeInstallationInput(event.target.value, defaultValue))}
+      onBlur={(event) => onChange(normalizeInstallationInput(event.target.value, defaultValue))}
+    />
+  );
+}
+
+function InstallationInfoCard({ label, value, icon }: { label: string; value: string | number; icon?: ReactNode }) {
+  return (
+    <div className="min-h-24 border border-[#d8dee6] bg-[#fbfcfd] p-3">
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase text-[#617080]">
+        {icon}
+        <span>{label}</span>
+      </div>
+      <p className="mt-3 text-xl font-semibold leading-snug">{typeof value === 'number' ? numberFormatter.format(value) : value}</p>
+    </div>
+  );
+}
+
+function InstallationScenario({
+  title,
+  ceoDays,
+  ctoDays,
+  totalDays,
+  endDate,
+}: {
+  title: string;
+  ceoDays: number;
+  ctoDays: number;
+  totalDays: number;
+  endDate: string;
+}) {
+  return (
+    <div className="border border-[#d8dee6] bg-[#fbfcfd] p-4">
+      <h4 className="font-semibold">{title}</h4>
+      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+        <dt className="text-[#617080]">CEO</dt>
+        <dd className="text-right font-medium">{formatDays(ceoDays)}</dd>
+        <dt className="text-[#617080]">CTO</dt>
+        <dd className="text-right font-medium">{formatDays(ctoDays)}</dd>
+        <dt className="text-[#617080]">Total</dt>
+        <dd className="text-right font-medium">{formatDays(totalDays)}</dd>
+        <dt className="text-[#617080]">Data final estimada</dt>
+        <dd className="text-right font-medium">{endDate || '-'}</dd>
+      </dl>
     </div>
   );
 }
@@ -536,4 +838,147 @@ function buildCableTotals(rows: CableSummaryRow[]) {
   }
 
   return totals;
+}
+
+interface InstallationSettings {
+  technicians: number;
+  ceoConservative: number;
+  ceoOptimistic: number;
+  ctoConservative: number;
+  ctoOptimistic: number;
+}
+
+interface InstallationEstimate {
+  capacity: {
+    ceoConservative: number;
+    ceoOptimistic: number;
+    ctoConservative: number;
+    ctoOptimistic: number;
+  };
+  ceo: {
+    quantity: number;
+    conservative: number;
+    optimistic: number;
+  };
+  cto: {
+    quantity: number;
+    conservative: number;
+    optimistic: number;
+  };
+  total: {
+    conservative: number;
+    optimistic: number;
+  };
+  endDate: {
+    conservative: string;
+    optimistic: string;
+  };
+}
+
+function calculateInstallation({
+  totalCEO,
+  totalCTO,
+  startDate,
+  businessDaysOnly,
+  settings,
+}: {
+  totalCEO: number;
+  totalCTO: number;
+  startDate: string;
+  businessDaysOnly: boolean;
+  settings: InstallationSettings;
+}): InstallationEstimate {
+  const normalizedSettings = normalizeInstallationSettings(settings);
+  const ceoDailyConservative = normalizedSettings.technicians * normalizedSettings.ceoConservative;
+  const ceoDailyOptimistic = normalizedSettings.technicians * normalizedSettings.ceoOptimistic;
+  const ctoDailyConservative = normalizedSettings.technicians * normalizedSettings.ctoConservative;
+  const ctoDailyOptimistic = normalizedSettings.technicians * normalizedSettings.ctoOptimistic;
+  const ceoConservative = Math.ceil(totalCEO / ceoDailyConservative);
+  const ceoOptimistic = Math.ceil(totalCEO / ceoDailyOptimistic);
+  const ctoConservative = Math.ceil(totalCTO / ctoDailyConservative);
+  const ctoOptimistic = Math.ceil(totalCTO / ctoDailyOptimistic);
+  const totalConservative = ceoConservative + ctoConservative;
+  const totalOptimistic = ceoOptimistic + ctoOptimistic;
+
+  return {
+    capacity: {
+      ceoConservative: ceoDailyConservative,
+      ceoOptimistic: ceoDailyOptimistic,
+      ctoConservative: ctoDailyConservative,
+      ctoOptimistic: ctoDailyOptimistic,
+    },
+    ceo: {
+      quantity: totalCEO,
+      conservative: ceoConservative,
+      optimistic: ceoOptimistic,
+    },
+    cto: {
+      quantity: totalCTO,
+      conservative: ctoConservative,
+      optimistic: ctoOptimistic,
+    },
+    total: {
+      conservative: totalConservative,
+      optimistic: totalOptimistic,
+    },
+    endDate: {
+      conservative: formatEndDate(startDate, totalConservative, businessDaysOnly),
+      optimistic: formatEndDate(startDate, totalOptimistic, businessDaysOnly),
+    },
+  };
+}
+
+function formatDays(days: number): string {
+  return `${numberFormatter.format(days)} ${days === 1 ? 'dia' : 'dias'}`;
+}
+
+function formatEndDate(startDate: string, days: number, businessDaysOnly: boolean): string {
+  const date = parseDateInput(startDate);
+  if (!date) return '';
+  if (businessDaysOnly) {
+    addProductiveDays(date, days);
+    return date.toLocaleDateString('pt-BR');
+  }
+  date.setDate(date.getDate() + days);
+  return date.toLocaleDateString('pt-BR');
+}
+
+function addProductiveDays(date: Date, days: number): void {
+  let remaining = days;
+  while (remaining > 0) {
+    date.setDate(date.getDate() + 1);
+    const day = date.getDay();
+    if (day >= 1 && day <= 5) {
+      remaining -= 1;
+    } else if (day === 6) {
+      remaining -= 0.5;
+    }
+  }
+}
+
+function normalizeInstallationInput(value: string, defaultValue: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 1) return defaultValue;
+  return Math.max(1, Math.floor(parsed));
+}
+
+function normalizeInstallationSettings(settings: InstallationSettings): InstallationSettings {
+  return {
+    technicians: normalizeInstallationValue(settings.technicians, DEFAULT_INSTALLATION_SETTINGS.technicians),
+    ceoConservative: normalizeInstallationValue(settings.ceoConservative, DEFAULT_INSTALLATION_SETTINGS.ceoConservative),
+    ceoOptimistic: normalizeInstallationValue(settings.ceoOptimistic, DEFAULT_INSTALLATION_SETTINGS.ceoOptimistic),
+    ctoConservative: normalizeInstallationValue(settings.ctoConservative, DEFAULT_INSTALLATION_SETTINGS.ctoConservative),
+    ctoOptimistic: normalizeInstallationValue(settings.ctoOptimistic, DEFAULT_INSTALLATION_SETTINGS.ctoOptimistic),
+  };
+}
+
+function normalizeInstallationValue(value: number, defaultValue: number): number {
+  if (!Number.isFinite(value) || value < 1) return defaultValue;
+  return Math.max(1, Math.floor(value));
+}
+
+function parseDateInput(value: string): Date | null {
+  const [year, month, day] = value.split('-').map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
 }
