@@ -3,28 +3,68 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light;
+  color: #18202b;
+  background: #f4f6f8;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
-  min-width: 320px;
   min-height: 100vh;
-  background: #f6f8fb;
-  color: #172033;
 }
 
 button,
+select,
 input {
   font: inherit;
 }
 
-@layer components {
-  .export-button {
-    @apply inline-flex items-center justify-center gap-2 rounded-md border px-4 py-2.5 text-sm font-semibold transition;
+@media (max-width: 1023px) {
+  body {
+    min-width: 0;
+  }
+
+  #root > div {
+    height: auto;
+    min-height: 100vh;
+    flex-direction: column;
+  }
+
+  #root aside {
+    width: 100%;
+    max-height: 42vh;
+    border-right: 0;
+    border-bottom: 1px solid #d8dee6;
+  }
+
+  #root main {
+    min-height: 58vh;
+  }
+
+  #root main > div:first-child {
+    align-items: flex-start;
+    gap: 12px;
+    flex-direction: column;
+  }
+
+  #root main > div:first-child > div:last-child {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  #root main > div:nth-child(2) > div {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  section.grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 }
