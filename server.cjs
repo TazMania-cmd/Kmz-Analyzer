@@ -1,23 +1,36 @@
 const express = require("express");
 const path = require("path");
+const fs = require("fs");
 const { exec } = require("child_process");
 
 const app = express();
-const port = 3000;
+const PORT = process.env.PORT || 3000;
 
-const distPath = path.join(__dirname, "dist");
+// Quando virar .exe, ele usa a pasta onde o .exe está.
+// Quando rodar com node, ele usa a pasta do projeto.
+const basePath = process.pkg ? path.dirname(process.execPath) : __dirname;
+const distPath = path.join(basePath, "dist");
+const indexPath = path.join(distPath, "index.html");
 
-app.use(express.static(distPath));
+if (!fs.existsSync(indexPath)) {
+  console.error("Erro: pasta dist ou index.html não encontrado.");
+  console.error("Caminho procurado:", indexPath);
+  console.log("");
+  console.log("Deixe a pasta dist no mesmo local do kmz-analyzer.exe.");
+  console.log("Pressione Ctrl + C para sair.");
+  process.stdin.resume();
+} else {
+  app.use(express.static(distPath));
 
-app.use((req, res) => {
-  res.sendFile(path.join(distPath, "index.html"));
-});
+  app.use((req, res) => {
+    res.sendFile(indexPath);
+  });
 
-app.listen(port, () => {
-  const url = `http://localhost:${port}`;
-  console.log(`KMZ Analyzer rodando em ${url}`);
+  app.listen(PORT, () => {
+    const url = `http://localhost:${PORT}`;
+    console.log(`KMZ Analyzer rodando em ${url}`);
 
-  if (process.platform === "win32") {
+    // Abre o navegador automaticamente no Windows
     exec(`start ${url}`);
-  }
-});
+  });
+}
